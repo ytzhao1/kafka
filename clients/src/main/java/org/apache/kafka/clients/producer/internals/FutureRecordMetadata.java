@@ -21,10 +21,13 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 
 /**
  * The future result of a record send
+ * 记录发送的未来结果
  */
 public final class FutureRecordMetadata implements Future<RecordMetadata> {
 
+    //指向对应消息所在RecordBatch的produceFuture字段
     private final ProduceRequestResult result;
+    //记录了对应消息在RecordBatch中的偏移量
     private final long relativeOffset;
     private final long timestamp;
     private final long checksum;
@@ -46,6 +49,13 @@ public final class FutureRecordMetadata implements Future<RecordMetadata> {
         return false;
     }
 
+    /**
+     * 当生产者收到某消息的响应时，此方法会返回RecordMetadata对象，
+     * 其中包含消息在Partition中的offset等其他元数据，可供用户自定义Callback使用
+     * @return
+     * @throws InterruptedException
+     * @throws ExecutionException
+     */
     @Override
     public RecordMetadata get() throws InterruptedException, ExecutionException {
         this.result.await();
@@ -66,7 +76,7 @@ public final class FutureRecordMetadata implements Future<RecordMetadata> {
         else
             return value();
     }
-    
+    // 从result中返回分区，偏移量，时间戳，等数据
     RecordMetadata value() {
         return new RecordMetadata(result.topicPartition(), this.result.baseOffset(), this.relativeOffset,
                                   this.timestamp, this.checksum, this.serializedKeySize, this.serializedValueSize);

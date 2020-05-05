@@ -125,30 +125,46 @@ import org.slf4j.LoggerFactory;
  * The <code>key.serializer</code> and <code>value.serializer</code> instruct how to turn the key and value objects the user provides with
  * their <code>ProducerRecord</code> into bytes. You can use the included {@link org.apache.kafka.common.serialization.ByteArraySerializer} or
  * {@link org.apache.kafka.common.serialization.StringSerializer} for simple string or byte types.
+ *
+ * Kafka是线程安全的，所以他所依赖的类，也是线程安全的
+ *
  */
 public class KafkaProducer<K, V> implements Producer<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaProducer.class);
+    //clientId 的生成器，如果没有明确指明id，则会自动生成一个
     private static final AtomicInteger PRODUCER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.producer";
-
+    //此生产者的唯一id
     private String clientId;
+    //分区选择器，根据一定的策略，将消息路由到合适的分区
     private final Partitioner partitioner;
+    //消息最大的长度，这个长度包含了消息头，序列化后的key的长度，序列化后的value的长度
     private final int maxRequestSize;
+    //发送单个消息的缓冲区大小
     private final long totalMemorySize;
+    //整个Kafka集群的元数据
     private final Metadata metadata;
+    //用于收集并缓存消息，等待Sender线程发送
     private final RecordAccumulator accumulator;
+    //发送消息的sender线程，实现了Runnable接口，在ioThread线程中执行
     private final Sender sender;
     private final Metrics metrics;
+    //执行Sender发送任务的线程
     private final Thread ioThread;
+    //压缩算法，可选：none,gzip,snappy,lz4,针对RecordAccumulator中的多条消息进行压缩，所以消息越多，压缩效果越好
     private final CompressionType compressionType;
     private final Sensor errors;
     private final Time time;
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
+    //配置对象，使用反射初始化KafkaProducer的对象
     private final ProducerConfig producerConfig;
+    //等待更新Kafka集群元数据信息的最长时间
     private final long maxBlockTimeMs;
+    //消息的超时时间，也就是从消息发送到收到ack响应的最长时间
     private final int requestTimeoutMs;
+    //ProducerInterceptors的集合，可以在消息发送之前对消息进行处理，也可以先于用户的Callback，对ACK进行响应
     private final ProducerInterceptors<K, V> interceptors;
 
     /**
@@ -222,8 +238,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
+            //使用反射机制实例化配置
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
+            //创建并更新Kafka集群的元数据
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG));
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
@@ -265,7 +283,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
 
-            this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
+            //创建RecordAccumulator
+            this.accumulator = new RecordAccumulator(
+                    //batch.size参数，指定的每个RecordBatch的大小，单位是字节
+                    config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.totalMemorySize,
                     this.compressionType,
                     config.getLong(ProducerConfig.LINGER_MS_CONFIG),
@@ -275,6 +296,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
+            //创建NetworkClient，KafkaProducer的网络I/O的核心
             NetworkClient client = new NetworkClient(
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
                     this.metadata,
@@ -296,6 +318,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     clientId,
                     this.requestTimeoutMs);
             String ioThreadName = "kafka-producer-network-thread" + (clientId.length() > 0 ? " | " + clientId : "");
+            //启动sender对应的线程
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
             this.ioThread.start();
 
@@ -355,10 +378,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Asynchronously send a record to a topic and invoke the provided callback when the send has been acknowledged.
+     * 异步的发送记录到topic中，并在收到发送回复后，执行提供的callBack
      * <p>
      * The send is asynchronous and this method will return immediately once the record has been stored in the buffer of
      * records waiting to be sent. This allows sending many records in parallel without blocking to wait for the
      * response after each one.
+     * 发送是异步的，并且当这个记录被存放在了缓冲区时，就会立即返回。这个允许并发的发送多条记录，而不会因为等待上一条消息的回复而阻塞
      * <p>
      * The result of the send is a {@link RecordMetadata} specifying the partition the record was sent to, the offset
      * it was assigned and the timestamp of the record. If
@@ -366,14 +391,22 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * will be the user provided timestamp or the record send time if the user did not specify a timestamp for the
      * record. If {@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime} is used for the
      * topic, the timestamp will be the Kafka broker local time when the message is appended.
+     *
+     * 发送方法的结果是，记录的分区，偏移量offset和时间戳
+     * 如果topic使用的CREATE_TIME，那么时间戳将是，用户提供的时间戳，或者记录发送的时间戳
+     * 如果topic使用的是LOG_APPEND_TIME，那么时间戳将是kafka broker的本地时间戳
      * <p>
      * Since the send call is asynchronous it returns a {@link java.util.concurrent.Future Future} for the
      * {@link RecordMetadata} that will be assigned to this record. Invoking {@link java.util.concurrent.Future#get()
      * get()} on this future will block until the associated request completes and then return the metadata for the record
      * or throw any exception that occurred while sending the record.
+     *
+     * 因为send调用时异步的，调用完会返回一个当前记录的Future，执行Future.get()方法，就会阻塞知道相关的请求完成并且返回metadata信息
+     * 或者抛出任何异常
      * <p>
      * If you want to simulate a simple blocking call you can call the <code>get()</code> method immediately:
      *
+     * 如果你想模拟简单的blocking调用，你可以调用get()方法
      * <pre>
      * {@code
      * byte[] key = "key".getBytes();
@@ -432,16 +465,19 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Implementation of asynchronously send a record to a topic. Equivalent to <code>send(record, null)</code>.
+     * 执行异步发送记录到topic，等价于send(record,null)方法
      * See {@link #send(ProducerRecord, Callback)} for details.
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
         TopicPartition tp = null;
         try {
             // first make sure the metadata for the topic is available
+            // 首先确保该主题的元数据可用
             long waitedOnMetadataMs = waitOnMetadata(record.topic(), this.maxBlockTimeMs);
             long remainingWaitMs = Math.max(0, this.maxBlockTimeMs - waitedOnMetadataMs);
             byte[] serializedKey;
             try {
+                //序列化Key
                 serializedKey = keySerializer.serialize(record.topic(), record.key());
             } catch (ClassCastException cce) {
                 throw new SerializationException("Can't convert key of class " + record.key().getClass().getName() +
@@ -450,6 +486,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
             byte[] serializedValue;
             try {
+                //序列化Value
                 serializedValue = valueSerializer.serialize(record.topic(), record.value());
             } catch (ClassCastException cce) {
                 throw new SerializationException("Can't convert value of class " + record.value().getClass().getName() +
@@ -465,6 +502,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // producer callback will make sure to call both 'callback' and interceptor callback
             Callback interceptCallback = this.interceptors == null ? callback : new InterceptorCallback<>(callback, this.interceptors, tp);
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey, serializedValue, interceptCallback, remainingWaitMs);
+            //唤醒sender线程的条件是：消息所在队列的最后一个RecordBatch满了，或者此队列中不止一个RecordBatch
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
@@ -507,28 +545,36 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Wait for cluster metadata including partitions for the given topic to be available.
+     * 等待集群元数据（包括给定主题的分区）可用。
      * @param topic The topic we want metadata for
      * @param maxWaitMs The maximum time in ms for waiting on the metadata
      * @return The amount of time we waited in ms
      */
     private long waitOnMetadata(String topic, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already.
+        //1.检查topics集合中是否包含指定的Topic，如果没有则添加进去
         if (!this.metadata.containsTopic(topic))
             this.metadata.add(topic);
 
+        //2.成功获取分区的详细信息
         if (metadata.fetch().partitionsForTopic(topic) != null)
             return 0;
 
         long begin = time.milliseconds();
         long remainingWaitMs = maxWaitMs;
+        //3.如果从metadata中获得当前topic的partitions为null，那么就去更新metadata数据
         while (metadata.fetch().partitionsForTopic(topic) == null) {
             log.trace("Requesting metadata update for topic {}.", topic);
             int version = metadata.requestUpdate();
+            //3.1唤醒sender线程
             sender.wakeup();
+            //3.2阻塞，等待元数据更新完毕
             metadata.awaitUpdate(version, remainingWaitMs);
             long elapsed = time.milliseconds() - begin;
+            //3.3检测超时时间
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
+            //3.4检测权限
             if (metadata.fetch().unauthorizedTopics().contains(topic))
                 throw new TopicAuthorizationException(topic);
             remainingWaitMs = maxWaitMs - elapsed;
@@ -538,6 +584,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Validate that the record size isn't too large
+     * 保证记录的size没有太大
      */
     private void ensureValidRecordSize(int size) {
         if (size > this.maxRequestSize)
@@ -558,6 +605,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * of <code>flush()</code> is that any previously sent record will have completed (e.g. <code>Future.isDone() == true</code>).
      * A request is considered completed when it is successfully acknowledged
      * according to the <code>acks</code> configuration you have specified or else it results in an error.
+     *
+     * 执行这个方法，确保所有的缓冲的记录，立即被发送，并阻塞调用线程，直到完全发送成功
      * <p>
      * Other threads can continue sending records while one thread is blocked waiting for a flush call to complete,
      * however no guarantee is made about the completion of records sent after the flush call begins.
@@ -595,6 +644,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     /**
      * Get the partition metadata for the give topic. This can be used for custom partitioning.
      * @throws InterruptException If the thread is interrupted while blocked
+     *
+     * 为给定topic获得分区元数据，这个可以用于自定义分区
      */
     @Override
     public List<PartitionInfo> partitionsFor(String topic) {
@@ -608,6 +659,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Get the full set of internal metrics maintained by the producer.
+     * 获取生产者维护的完整内部指标集。用于记录统计信息，与消息发送流程无关
      */
     @Override
     public Map<MetricName, ? extends Metric> metrics() {
@@ -617,12 +669,15 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     /**
      * Close this producer. This method blocks until all previously sent requests complete.
      * This method is equivalent to <code>close(Long.MAX_VALUE, TimeUnit.MILLISECONDS)</code>.
+     *
+     * 关闭生产者，此方法将会阻塞，直到所有前面的记录被发送，并完成
      * <p>
      * <strong>If close() is called from {@link Callback}, a warning message will be logged and close(0, TimeUnit.MILLISECONDS)
      * will be called instead. We do this because the sender thread would otherwise try to join itself and
      * block forever.</strong>
      * <p>
-     *
+     * 如果close()方法在Callback中被调用，会记录一个warning信息，并且用close(0,MillSeconds)来代替，
+     * 我们这样做是因为发送者线程（send thread）否则将尝试加入自身并永远阻止。？？？
      * @throws InterruptException If the thread is interrupted while blocked
      */
     @Override
@@ -635,6 +690,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * <p>
      * If the producer is unable to complete all requests before the timeout expires, this method will fail
      * any unsent and unacknowledged records immediately.
+     *
+     * 如果生产者在超时时间内不能完成全部的请求，那么这个方法将会失败，任何未发送，未确认的记录都会理解出现
      * <p>
      * If invoked from within a {@link Callback} this method will not block and will be equivalent to
      * <code>close(0, TimeUnit.MILLISECONDS)</code>. This is done since no further sending will happen while
@@ -665,6 +722,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     "This means you have incorrectly invoked close with a non-zero timeout from the producer call-back.", timeout);
             } else {
                 // Try to close gracefully.
+                // 尝试温柔的关闭
                 if (this.sender != null)
                     this.sender.initiateClose();
                 if (this.ioThread != null) {
@@ -706,18 +764,22 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * computes partition for given record.
      * if the record has partition returns the value otherwise
      * calls configured partitioner class to compute the partition.
+     * 计算给定记录的分区。
+     * 如果记录具有分区，则返回该值；否则调用配置的分区程序类来计算分区。
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey , byte[] serializedValue, Cluster cluster) {
         Integer partition = record.partition();
+        //如果record指定了partition，那么直接使用用户指定的partition
         if (partition != null) {
             List<PartitionInfo> partitions = cluster.partitionsForTopic(record.topic());
             int lastPartition = partitions.size() - 1;
-            // they have given us a partition, use it
+            //校验partition是否真实存在
             if (partition < 0 || partition > lastPartition) {
                 throw new IllegalArgumentException(String.format("Invalid partition given with record: %d is not in the range [0...%d].", partition, lastPartition));
             }
             return partition;
         }
+        //用户没有指定partition，则返回的计算的分区
         return this.partitioner.partition(record.topic(), record.key(), serializedKey, record.value(), serializedValue,
             cluster);
     }

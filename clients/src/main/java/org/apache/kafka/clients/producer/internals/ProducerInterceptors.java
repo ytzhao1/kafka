@@ -45,11 +45,17 @@ public class ProducerInterceptors<K, V> implements Closeable {
      * The method calls {@link ProducerInterceptor#onSend(ProducerRecord)} method. ProducerRecord
      * returned from the first interceptor's onSend() is passed to the second interceptor onSend(), and so on in the
      * interceptor chain. The record returned from the last interceptor is returned from this method.
+     * 会依次执行调用链上的信息
      *
      * This method does not throw exceptions. Exceptions thrown by any of interceptor methods are caught and ignored.
      * If an interceptor in the middle of the chain, that normally modifies the record, throws an exception,
      * the next interceptor in the chain will be called with a record returned by the previous interceptor that did not
      * throw an exception.
+     *
+     * 此方法不会引发异常。 任何拦截器方法抛出的异常都会被捕获并忽略。
+     * 如果位于链中间的拦截器（通常会修改记录）抛出异常，
+     * 链中的下一个拦截器将被前一个拦截器没有返回的记录调用
+     * 引发异常。
      *
      * @param record the record from client
      * @return producer record to send to topic/partition
@@ -62,6 +68,7 @@ public class ProducerInterceptors<K, V> implements Closeable {
             } catch (Exception e) {
                 // do not propagate interceptor exception, log and continue calling other interceptors
                 // be careful not to throw exception from here
+                // 不要传播拦截器异常，请记录并继续调用其他拦截器,注意这里不会返回异常
                 if (record != null)
                     log.warn("Error executing interceptor onSend callback for topic: {}, partition: {}", record.topic(), record.partition(), e);
                 else

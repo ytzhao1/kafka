@@ -83,9 +83,11 @@ public class Sender implements Runnable {
     private final Time time;
 
     /* true while the sender thread is still running */
+    // 当sender线程仍旧运行时，返回true
     private volatile boolean running;
 
     /* true when the caller wants to ignore all unsent/inflight messages and force close.  */
+    //忽略所有未发送，发送中的消息，并且强行关闭
     private volatile boolean forceClose;
 
     /* metrics */
@@ -142,6 +144,7 @@ public class Sender implements Runnable {
         // okay we stopped accepting requests but there may still be
         // requests in the accumulator or waiting for acknowledgment,
         // wait until these are completed.
+        // 我们停止接收请求，但是在accumulator中可能仍然存在请求，或者等待ack，直到这些完成
         while (!forceClose && (this.accumulator.hasUnsent() || this.client.inFlightRequestCount() > 0)) {
             try {
                 run(time.milliseconds());
@@ -152,6 +155,7 @@ public class Sender implements Runnable {
         if (forceClose) {
             // We need to fail all the incomplete batches and wake up the threads waiting on
             // the futures.
+            // 我们需要对所有未完成的分支，置为失败，并且唤醒等待的futures
             this.accumulator.abortIncompleteBatches();
         }
         try {
@@ -168,10 +172,12 @@ public class Sender implements Runnable {
      * 
      * @param now
      *            The current POSIX time in milliseconds
+     * 消息发送线程(Sender)读取记录收集器，按照节点分组，创建客户端请求，发送请求
      */
     void run(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        //获取准备发送的所有分区
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
@@ -179,6 +185,7 @@ public class Sender implements Runnable {
             this.metadata.requestUpdate();
 
         // remove any nodes we aren't ready to send to
+        //建立到主副本节点的网络连接，移除还没有准备好的节点
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
@@ -190,6 +197,7 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        //读取记录收集器，返回每个主副本节点对应批次记录列表，每个批记录对应一个分区
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
@@ -208,6 +216,7 @@ public class Sender implements Runnable {
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
+        //以节点为级别的生产请求列表，即每个节点只有一个客户端请求
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -219,6 +228,7 @@ public class Sender implements Runnable {
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
+        //将请求放到队列中等待发送，请求只能发送给准备好的节点
         for (ClientRequest request : requests)
             client.send(request, now);
 
@@ -226,11 +236,13 @@ public class Sender implements Runnable {
         // otherwise if some partition already has some data accumulated but not ready yet,
         // the select time will be the time difference between now and its linger expiry time;
         // otherwise the select time will be the time difference between now and the metadata expiry time;
+        //这里才会真正执行网络读写请求，比如将上面的客户端请求真正发送出去
         this.client.poll(pollTimeout, now);
     }
 
     /**
      * Start closing the sender (won't actually complete until all data is sent out)
+     * 开始关闭sender，直到所有的数据被发送出去
      */
     public void initiateClose() {
         this.running = false;
@@ -240,6 +252,7 @@ public class Sender implements Runnable {
 
     /**
      * Closes the sender without sending out any pending messages.
+     * 关闭sender，不发送任何消息
      */
     public void forceClose() {
         this.forceClose = true;
@@ -248,9 +261,11 @@ public class Sender implements Runnable {
 
     /**
      * Handle a produce response
+     * 处理产品响应
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
+        //对于连接断开而产生的ClientResponse，会重试发送请求，若不能重试，则调用其中每条信息的回调
         if (response.wasDisconnected()) {
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
@@ -269,6 +284,7 @@ public class Sender implements Runnable {
                     ProduceResponse.PartitionResponse partResp = entry.getValue();
                     Errors error = Errors.forCode(partResp.errorCode);
                     RecordBatch batch = batches.get(tp);
+                    //调用completeBatch方法处理
                     completeBatch(batch, error, partResp.baseOffset, partResp.timestamp, correlationId, now);
                 }
                 this.sensors.recordLatency(response.request().request().destination(), response.requestLatencyMs());
@@ -276,6 +292,7 @@ public class Sender implements Runnable {
                                                 produceResponse.getThrottleTime());
             } else {
                 // this is the acks = 0 case, just complete all requests
+                //不需要响应的请求，直接调用completeBatch()处理
                 for (RecordBatch batch : batches.values())
                     completeBatch(batch, Errors.NONE, -1L, Record.NO_TIMESTAMP, correlationId, now);
             }
@@ -284,6 +301,7 @@ public class Sender implements Runnable {
 
     /**
      * Complete or retry the given batch of records.
+     * 完成或重试给定的记录批次
      * 
      * @param batch The record batch
      * @param error The error (or null if none)
@@ -300,21 +318,28 @@ public class Sender implements Runnable {
                      batch.topicPartition,
                      this.retries - batch.attempts - 1,
                      error);
+            //对于可重试的RecordBatch，则重新添加到RecordAccumulator中，等待发送
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
         } else {
+            //不能重试的话，会将RecordBatch都标记为"异常完成"，并释放RecordBatch
             RuntimeException exception;
-            if (error == Errors.TOPIC_AUTHORIZATION_FAILED)
+            if (error == Errors.TOPIC_AUTHORIZATION_FAILED) {
                 exception = new TopicAuthorizationException(batch.topicPartition.topic());
-            else
+            }
+            else {
                 exception = error.exception();
+            }
             // tell the user the result of their request
+            //调用done方法，调用消息的回调函数
             batch.done(baseOffset, timestamp, exception);
+            //释放空间
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
         }
         if (error.exception() instanceof InvalidMetadataException)
+            //标识需要更新Metadata中记录的集群元数据
             metadata.requestUpdate();
         // Unmute the completed partition.
         if (guaranteeMessageOrder)
@@ -330,40 +355,48 @@ public class Sender implements Runnable {
 
     /**
      * Transfer the record batches into a list of produce requests on a per-node basis
+     * 将记录批转移到每个节点的生产请求列表中
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
         for (Map.Entry<Integer, List<RecordBatch>> entry : collated.entrySet())
+            //调用produceRequest()方法，将发往同一Node的RecordBatch封装成一个ClientRequest对象
             requests.add(produceRequest(now, entry.getKey(), acks, requestTimeout, entry.getValue()));
         return requests;
     }
 
     /**
      * Create a produce request from the given record batches
+     * 发送线程为每个目标节点创建一个客户端请求
      */
     private ClientRequest produceRequest(long now, int destination, short acks, int timeout, List<RecordBatch> batches) {
+        //注意：produceRecordsByPartition和recordsByPartition的value是不一样的，一个是ByteBuffer，一个是RecordBatch
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
+        //步骤1：将RecordBatch列表按照partition进行分类，整理成上述两个集合
         for (RecordBatch batch : batches) {
             TopicPartition tp = batch.topicPartition;
             produceRecordsByPartition.put(tp, batch.records.buffer());
             recordsByPartition.put(tp, batch);
         }
+        //步骤2：创建ProduceRequest和RequestSend
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());
+        //步骤3：创建RequestCompletionHandler作为回调对象，其具体逻辑在后面详解
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }
         };
-
+        //创建ClientRequest对象。注意其第二个参数，根据acks配置决定请求时是否需要获取响应
         return new ClientRequest(now, acks != 0, send, callback);
     }
 
     /**
      * Wake up the selector associated with this send thread
+     * 唤醒与此发送线程关联的选择器
      */
     public void wakeup() {
         this.client.wakeup();

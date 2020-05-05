@@ -26,6 +26,8 @@ import java.util.Set;
  * A container that holds the list {@link ConsumerRecord} per partition for a
  * particular topic. There is one {@link ConsumerRecord} list for every topic
  * partition returned by a {@link Consumer#poll(long)} operation.
+ *
+ * 装poll回来的数据的
  */
 public class ConsumerRecords<K, V> implements Iterable<ConsumerRecord<K, V>> {
 

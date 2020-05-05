@@ -26,16 +26,24 @@ import java.util.Set;
 
 /**
  * A representation of a subset of the nodes, topics, and partitions in the Kafka cluster.
+ * Kafka集群中节点，主题和分区的子集的表示形式。
+ * 这里所有的属性，都是用final修饰的
  */
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
+    //kafka集群中的节点信息
     private final List<Node> nodes;
     private final Set<String> unauthorizedTopics;
+    //记录了TopicPartition和PartitionInfo之间的关系
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    //记录了Topic和PartitionInfo的映射关系，可以按照Topic名称查询其中全部的partition信息
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    //topic与PartitionInfo的映射关系，List中存在的分区，必须是有Leader副本的分区
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    //记录了Node与PartitionInfo的映射关系，可以按照节点id查询以上分布的全部分区的详细信息
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    //BrokerId 与Node节点中的对应关系，方便按照BrokerId进行检索
     private final Map<Integer, Node> nodesById;
 
     /**
@@ -176,6 +184,7 @@ public final class Cluster {
 
     /**
      * Get the list of partitions for this topic
+     * 获得当前topic的分区的list
      * @param topic The topic name
      * @return A list of partitions
      */

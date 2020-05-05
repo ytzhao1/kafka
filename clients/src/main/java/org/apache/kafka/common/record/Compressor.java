@@ -29,6 +29,10 @@ import java.nio.ByteBuffer;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
+/**
+ * 提供压缩功能
+ * 提供了一些put*()方法，向appendStream流写入数据，典型的装饰者模式
+ */
 public class Compressor {
 
     static private final float COMPRESSION_RATE_DAMPING_FACTOR = 0.9f;

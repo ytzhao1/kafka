@@ -24,24 +24,30 @@ import org.apache.kafka.common.utils.AbstractIterator;
 
 /**
  * A {@link Records} implementation backed by a ByteBuffer.
+ *
+ * 由ByteBuffer支持的{@link Records}实现。
  */
 public class MemoryRecords implements Records {
 
     private final static int WRITE_LIMIT_FOR_READABLE_ONLY = -1;
 
     // the compressor used for appends-only
+    // 仅用于附加的压缩器，对消息进行压缩，将压缩后的数据输出到buffer
     private final Compressor compressor;
 
     // the write limit for writable buffer, which may be smaller than the buffer capacity
+    // 记录buffer字段最多可以写入多少个字节的数据
     private final int writeLimit;
 
     // the capacity of the initial buffer, which is only used for de-allocation of writable records
     private final int initialCapacity;
 
     // the underlying buffer used for read; while the records are still writable it is null
+    // 用于读取的底层缓冲区； 当记录仍然可写时，它为null
     private ByteBuffer buffer;
 
     // indicate if the memory records is writable or not (i.e. used for appends or read-only)
+    // 此MemoryRecords是可读还是可写模式，在MemoryRecords发送前，是只读模式
     private boolean writable;
 
     // Construct a writable memory records
@@ -73,14 +79,17 @@ public class MemoryRecords implements Records {
 
     /**
      * Append the given record and offset to the buffer
+     * 消息写入byteBuffer中
      */
     public void append(long offset, Record record) {
+        //先判断是否为可用模式
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
 
         int size = record.size();
         compressor.putLong(offset);
         compressor.putInt(size);
+        //把数据写入ByteBuffer中
         compressor.put(record.buffer());
         compressor.recordWritten(size + Records.LOG_OVERHEAD);
         record.buffer().rewind();
@@ -104,6 +113,9 @@ public class MemoryRecords implements Records {
 
     /**
      * Check if we have room for a new record containing the given key/value pair
+     *
+     * 根据Compressor估算的已写字节数，估计MemoryRecords剩余空间是否足够写入指定的数据。
+     * 因为是估算，所以是不准确的
      *
      * Note that the return value is based on the estimate of the bytes written to the compressor, which may not be
      * accurate if compression is really used. When this happens, the following append may cause dynamic buffer
@@ -129,28 +141,36 @@ public class MemoryRecords implements Records {
 
     /**
      * Close this batch for no more appends
+     *
      */
     public void close() {
         if (writable) {
             // close the compressor to fill-in wrapper message metadata if necessary
+            // 如有必要，关闭压缩程序以填充包装器消息元数据
             compressor.close();
 
             // flip the underlying buffer to be ready for reads
+            //翻转底层缓冲区以准备读取
             buffer = compressor.buffer();
             buffer.flip();
 
             // reset the writable flag
+            // 是否可读，置为不可读
             writable = false;
         }
     }
 
     /**
      * The size of this record set
+     * 返回当前记录的size
      */
     public int sizeInBytes() {
+        // 如果是可写的
         if (writable) {
+            // 返回ByteOutputStream的buffer的字段的大小
             return compressor.buffer().position();
         } else {
+            // 对于只读的MemoryRecords，返回的是MemoryRecords.buffer 大小
             return buffer.limit();
         }
     }
@@ -219,7 +239,9 @@ public class MemoryRecords implements Records {
     }
 
     public static class RecordsIterator extends AbstractIterator<LogEntry> {
+        //
         private final ByteBuffer buffer;
+        //要进行压缩的数据
         private final DataInputStream stream;
         private final CompressionType type;
         private final boolean shallow;

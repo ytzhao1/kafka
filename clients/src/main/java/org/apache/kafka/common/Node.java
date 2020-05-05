@@ -14,6 +14,7 @@ package org.apache.kafka.common;
 
 /**
  * Information about a Kafka node
+ * kafka的节点信息
  */
 public class Node {
 
@@ -21,7 +22,9 @@ public class Node {
 
     private final int id;
     private final String idString;
+    //ip
     private final String host;
+    //端口
     private final int port;
     private final String rack;
 

@@ -16,8 +16,8 @@ package org.apache.kafka.clients.consumer.internals;
  * Listener interface to hook into RequestFuture completion.
  */
 public interface RequestFutureListener<T> {
-
+    //请求正常
     void onSuccess(T value);
-
+    //出现异常
     void onFailure(RuntimeException e);
 }

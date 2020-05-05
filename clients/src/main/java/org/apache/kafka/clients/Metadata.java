@@ -32,20 +32,31 @@ import org.slf4j.LoggerFactory;
  * 
  * Metadata is maintained for only a subset of topics, which can be added to over time. When we request metadata for a
  * topic we don't have any metadata for it will trigger a metadata update.
+ * 保存所有的元数据信息，并定时更新
+ * 线程安全的类，所有方法前面都有sync关键字
  */
 public final class Metadata {
 
     private static final Logger log = LoggerFactory.getLogger(Metadata.class);
 
+    //两次发出更新Cluster保存的元数据信息最小的时间差，默认100ms
     private final long refreshBackoffMs;
+    //每隔多久就更新一次
     private final long metadataExpireMs;
+    //记录了元数据版本的版本号，Kafka集群元数据，每更新一次就+1，
     private int version;
+    //上一次更新元数据的时间戳，包含失败
     private long lastRefreshMs;
+    //上一次成功更新的时间戳
     private long lastSuccessfulRefreshMs;
+    //记录了topic最新的元数据
     private Cluster cluster;
     private boolean needUpdate;
+    //记录了当前已知的所有topic
     private final Set<String> topics;
+    //监听metaData更新的监听器集合，在更新cluster中的字段前，会通知listener集合中全部的Listner对象
     private final List<Listener> listeners;
+    //是否需要更新全部的topic数据
     private boolean needMetadataForAllTopics;
 
     /**
@@ -75,17 +86,28 @@ public final class Metadata {
     }
 
     /**
+     * Add the topic to maintain in the metadata
+     * 添加主题以在元数据中维护
+     */
+    public synchronized void add(String topic) {
+        topics.add(topic);
+    }
+
+    /**
      * Get the current cluster info without blocking
+     * 获取当前的集群信息而不会阻塞
      */
     public synchronized Cluster fetch() {
         return this.cluster;
     }
 
     /**
-     * Add the topic to maintain in the metadata
+     * Request an update of the current cluster metadata info, return the current version before the update
+     * 需要更新当前集群中的元数据信息，在更新前返回当前的version
      */
-    public synchronized void add(String topic) {
-        topics.add(topic);
+    public synchronized int requestUpdate() {
+        this.needUpdate = true;
+        return this.version;
     }
 
     /**
@@ -100,14 +122,6 @@ public final class Metadata {
     }
 
     /**
-     * Request an update of the current cluster metadata info, return the current version before the update
-     */
-    public synchronized int requestUpdate() {
-        this.needUpdate = true;
-        return this.version;
-    }
-
-    /**
      * Check whether an update has been explicitly requested.
      * @return true if an update was requested, false otherwise
      */
@@ -117,6 +131,7 @@ public final class Metadata {
 
     /**
      * Wait for metadata update until the current version is larger than the last version we know of
+     * 等待元数据更新，知道当前的version大于我们知道的最后一个version
      */
     public synchronized void awaitUpdate(final int lastVersion, final long maxWaitMs) throws InterruptedException {
         if (maxWaitMs < 0) {
@@ -124,10 +139,13 @@ public final class Metadata {
         }
         long begin = System.currentTimeMillis();
         long remainingWaitMs = maxWaitMs;
+        //直到当前version>lastVrsion
         while (this.version <= lastVersion) {
+            //主线程与Sender线程通过wait/notify同步，更新元数据的操作则交给Sender线程去完成
             if (remainingWaitMs != 0)
                 wait(remainingWaitMs);
             long elapsed = System.currentTimeMillis() - begin;
+            //是否超时
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
             remainingWaitMs = maxWaitMs - elapsed;
@@ -165,17 +183,22 @@ public final class Metadata {
      * Update the cluster metadata
      */
     public synchronized void update(Cluster cluster, long now) {
+        //不再需要更新
         this.needUpdate = false;
+        //最后更新时间为现在
         this.lastRefreshMs = now;
+        //上次成功更新时间为现在
         this.lastSuccessfulRefreshMs = now;
+        //当前版本+1
         this.version += 1;
 
+        //监听
         for (Listener listener: listeners)
             listener.onMetadataUpdate(cluster);
 
         // Do this after notifying listeners as subscribed topics' list can be changed by listeners
         this.cluster = this.needMetadataForAllTopics ? getClusterForCurrentTopics(cluster) : cluster;
-
+        //更新完元数据后，唤醒等待此元数据的所有线程
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }

@@ -22,10 +22,12 @@ import java.util.Map;
 
 /**
  * The set of requests which have been sent or are being sent but haven't yet received a response
+ * 已发送或正在发送但尚未收到响应的一组请求
  */
 final class InFlightRequests {
 
     private final int maxInFlightRequestsPerConnection;
+    //key是nodeId，value是发送到对应Node的ClientRequest对象集合
     private final Map<String, Deque<ClientRequest>> requests = new HashMap<String, Deque<ClientRequest>>();
 
     public InFlightRequests(int maxInFlightRequestsPerConnection) {
@@ -45,6 +47,13 @@ final class InFlightRequests {
     }
 
     /**
+     * Get the oldest request (the one that that will be completed next) for the given node
+     */
+    public ClientRequest completeNext(String node) {
+        return requestQueue(node).pollLast();
+    }
+
+    /**
      * Get the request queue for the given node
      */
     private Deque<ClientRequest> requestQueue(String node) {
@@ -52,13 +61,6 @@ final class InFlightRequests {
         if (reqs == null || reqs.isEmpty())
             throw new IllegalStateException("Response from server for which there are no in-flight requests.");
         return reqs;
-    }
-
-    /**
-     * Get the oldest request (the one that that will be completed next) for the given node
-     */
-    public ClientRequest completeNext(String node) {
-        return requestQueue(node).pollLast();
     }
 
     /**
@@ -71,6 +73,7 @@ final class InFlightRequests {
 
     /**
      * Complete the last request that was sent to a particular node.
+     * 完成发送到特定节点的最后一个请求。
      * @param node The node the request was sent to
      * @return The request
      */
@@ -80,12 +83,18 @@ final class InFlightRequests {
 
     /**
      * Can we send more requests to this node?
+     *
+     * 我们是否可以发送更多的请求到这个节点上？
      * 
      * @param node Node in question
      * @return true iff we have no requests still being sent to the given node
      */
     public boolean canSendMore(String node) {
+        //从HashMap中获得node对应的queue
         Deque<ClientRequest> queue = requests.get(node);
+        //队列的头结点，是否已经发送完成，如果队头的请求迟迟发送不出去，可能是网络出现问题，则不能继续向此Node发送请求
+        //size比较的是，判断InFlightRequests队列中是否堆积过多请求，如果Node已经堆积了很多未响应的请求，
+        // 说明这个节点负载可能较大，或是网络连接有问题
         return queue == null || queue.isEmpty() ||
                (queue.peekFirst().request().completed() && queue.size() < this.maxInFlightRequestsPerConnection);
     }

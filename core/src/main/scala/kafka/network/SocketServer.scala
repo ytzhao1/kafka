@@ -50,6 +50,7 @@ import scala.util.control.{ControlThrowable, NonFatal}
  */
 class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time) extends Logging with KafkaMetricsGroup {
 
+
   private val endpoints = config.listeners
   private val numProcessorThreads = config.numNetworkThreads
   private val maxQueuedRequests = config.queuedMaxRequests

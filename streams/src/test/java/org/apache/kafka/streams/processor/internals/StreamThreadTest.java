@@ -161,7 +161,7 @@ public class StreamThreadTest {
             @Override
             protected StreamTask createStreamTask(TaskId id, Collection<TopicPartition> partitionsForTask) {
                 ProcessorTopology topology = builder.build(id.topicGroupId);
-                return new TestStreamTask(id, applicationId, partitionsForTask, topology, consumer, producer, restoreConsumer, config);
+                return new TestStreamTask(id, applicationId, partitionsForTask, topology, myConsumer, producer, restoreConsumer, config);
             }
         };
 
@@ -285,7 +285,7 @@ public class StreamThreadTest {
                 @Override
                 protected StreamTask createStreamTask(TaskId id, Collection<TopicPartition> partitionsForTask) {
                     ProcessorTopology topology = builder.build(id.topicGroupId);
-                    return new TestStreamTask(id, applicationId, partitionsForTask, topology, consumer, producer, restoreConsumer, config);
+                    return new TestStreamTask(id, applicationId, partitionsForTask, topology, myConsumer, producer, restoreConsumer, config);
                 }
             };
 
@@ -404,7 +404,7 @@ public class StreamThreadTest {
                 @Override
                 protected StreamTask createStreamTask(TaskId id, Collection<TopicPartition> partitionsForTask) {
                     ProcessorTopology topology = builder.build(id.topicGroupId);
-                    return new TestStreamTask(id, applicationId, partitionsForTask, topology, consumer, producer, restoreConsumer, config);
+                    return new TestStreamTask(id, applicationId, partitionsForTask, topology, myConsumer, producer, restoreConsumer, config);
                 }
             };
 

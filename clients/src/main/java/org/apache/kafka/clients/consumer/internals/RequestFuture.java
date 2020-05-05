@@ -39,9 +39,13 @@ import java.util.List;
  */
 public class RequestFuture<T> {
 
+    //当前请求是否已经完成，不管是正常完成还是出现异常，此字段都会被设置为true
     private boolean isDone = false;
+    //记录请求正常完成时收到的响应，与exception字段互斥，此字段费控则表示出现异常，反之则表示正常完成
     private T value;
+    //记录导致请求异常完成的异常类，与value字段互斥。此字段非空则表示出现异常，反之则表示正常完成
     private RuntimeException exception;
+    //用来监听请求完成的情况
     private List<RequestFutureListener<T>> listeners = new ArrayList<>();
 
 
@@ -158,9 +162,12 @@ public class RequestFuture<T> {
      * @param adapter The adapter which does the conversion
      * @param <S> The type of the future adapted to
      * @return The new future
+     * 适配器模式，将RequestFuture<T>适配成RequestFuture<S>
      */
     public <S> RequestFuture<S> compose(final RequestFutureAdapter<T, S> adapter) {
+        //适配之后的结果
         final RequestFuture<S> adapted = new RequestFuture<S>();
+        //在当前RequestFuture上添加监听器
         addListener(new RequestFutureListener<T>() {
             @Override
             public void onSuccess(T value) {
@@ -175,15 +182,22 @@ public class RequestFuture<T> {
         return adapted;
     }
 
+    /**
+     * 责任链模式
+     * @param future
+     */
     public void chain(final RequestFuture<T> future) {
+        //添加监听器
         addListener(new RequestFutureListener<T>() {
             @Override
             public void onSuccess(T value) {
+                //通过监听器将value传递给下一个RequestFuture对象
                 future.complete(value);
             }
 
             @Override
             public void onFailure(RuntimeException e) {
+                //通过监听器将异常传递给下一个RequestFuture对象
                 future.raise(e);
             }
         });

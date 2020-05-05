@@ -501,20 +501,51 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaConsumer.class);
     private static final long NO_CURRENT_THREAD = -1L;
+    /**
+     * clientId的生成器，如果没有明确指定client的id，则使用字段生成一个ID
+     */
     private static final AtomicInteger CONSUMER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.consumer";
-
+    /**
+     * Consumer的唯一标识
+     */
     private final String clientId;
+    /**
+     * 控制着Consumer与服务端GroupCoordinator之间的通信逻辑，
+     * 可以理解为Consumer与服务端GroupCoordinator通信的门面
+     */
     private final ConsumerCoordinator coordinator;
+    /**
+     * key的反序列化器
+     */
     private final Deserializer<K> keyDeserializer;
+    /**
+     * value的反序列化器
+     */
     private final Deserializer<V> valueDeserializer;
+    /**
+     * 负责从服务端获取消息
+     */
     private final Fetcher<K, V> fetcher;
+    /**
+     * ConsumerInterceptors.onConsumer()方法可以在消息通过poll()方法返回给用户之前对其进行拦截或修改；
+     * ConsumerInterceptors.onCommit()方法可以在服务端返回提交offset成功的响应时对其进行拦截或修改。
+     */
     private final ConsumerInterceptors<K, V> interceptors;
 
     private final Time time;
+    /**
+     * 负责消费者与Kafka服务端的网络通信
+     */
     private final ConsumerNetworkClient client;
     private final Metrics metrics;
+    /**
+     * 维护了消费者的消费状态
+     */
     private final SubscriptionState subscriptions;
+    /**
+     * 记录了整个kafka集群的元信息
+     */
     private final Metadata metadata;
     private final long retryBackoffMs;
     private final long requestTimeoutMs;
@@ -524,6 +555,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     // and is used to prevent multi-threaded access
     private final AtomicLong currentThread = new AtomicLong(NO_CURRENT_THREAD);
     // refcount is used to allow reentrant access by the thread who has acquired currentThread
+    //返回重入次数
     private final AtomicInteger refcount = new AtomicInteger(0);
 
     /**
@@ -764,6 +796,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * 订阅指定的topic，并未消费者自动分配分区
      * Subscribe to the given list of topics to get dynamically
      * assigned partitions. <b>Topic subscriptions are not incremental. This list will replace the current
      * assignment (if there is one).</b> Note that it is not possible to combine topic subscription with group management
@@ -876,6 +909,8 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     *用户手动订阅的Topic，并为消费者自动分配分区。
+     * 此方法与subscribe（）方法互斥。
      * Manually assign a list of partition to this consumer. This interface does not allow for incremental assignment
      * and will replace the previous assignment (if there is one).
      * <p>
@@ -902,6 +937,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * 负责从服务端获取信息
      * Fetch data for the topics or partitions specified using one of the subscribe/assign APIs. It is an error to not have
      * subscribed to any topics or partitions before polling for data.
      * <p>
@@ -913,6 +949,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @param timeout The time, in milliseconds, spent waiting in poll if data is not available in the buffer.
      *            If 0, returns immediately with any records that are available currently in the buffer, else returns empty.
      *            Must not be negative.
+     *            超时时间，代表buffer中没有数据可用的，等待数据过来的时间
      * @return map of topic to records since the last fetch for the subscribed list of topics and partitions
      *
      * @throws org.apache.kafka.clients.consumer.InvalidOffsetException if the offset for a partition or set of
@@ -1091,6 +1128,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * 提交消费者已经消费完成的offset
      * Commit the specified offsets for the specified list of topics and partitions to Kafka.
      * <p>
      * This commits offsets to Kafka. The offsets committed using this API will be used on the first fetch after every
@@ -1117,6 +1155,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * 指定消费者起始消费的位置
      * Overrides the fetch offsets that the consumer will use on the next {@link #poll(long) poll(timeout)}. If this API
      * is invoked for the same partition more than once, the latest offset will be used on the next poll(). Note that
      * you may lose data if this API is arbitrarily used in the middle of consumption, to reset the fetch offsets

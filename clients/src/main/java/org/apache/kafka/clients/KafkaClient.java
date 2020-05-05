@@ -130,6 +130,7 @@ public interface KafkaClient extends Closeable {
 
     /**
      * Wake up the client if it is currently blocked waiting for I/O
+     * 如果客户端当前正在等待I / O而被唤醒，请唤醒它
      */
     public void wakeup();
 

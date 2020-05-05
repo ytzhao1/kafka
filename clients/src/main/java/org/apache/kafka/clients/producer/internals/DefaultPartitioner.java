@@ -35,6 +35,7 @@ import org.apache.kafka.common.utils.Utils;
  */
 public class DefaultPartitioner implements Partitioner {
 
+    //counter 初始化为一个随机数。注意：是一个AtomicInteger
     private final AtomicInteger counter = new AtomicInteger(new Random().nextInt());
 
     /**
@@ -43,8 +44,16 @@ public class DefaultPartitioner implements Partitioner {
      * positive value is the original value bit AND against 0x7fffffff which is not its absolutely
      * value.
      *
+     * 确定性地将数字转换为正值的廉价方法。 当输入为
+     * 正号，返回原始值。 输入数字为负数时，返回
+     * 正值是原始值位，并且与0x7fffffff绝对不是绝对值
+     * 值。
+     *
      * Note: changing this method in the future will possibly cause partition selection not to be
      * compatible with the existing messages already placed on a partition.
+     *
+     * 注意：将来更改此方法可能会导致分区选择不正确
+     * 与已经放置在分区上的现有消息兼容。
      *
      * @param number a given number
      * @return a positive number.
@@ -57,7 +66,7 @@ public class DefaultPartitioner implements Partitioner {
 
     /**
      * Compute the partition for the given record.
-     *
+     * 根据给定的记录，计算分区
      * @param topic The topic name
      * @param key The key to partition on (or null if no key)
      * @param keyBytes serialized key to partition on (or null if no key)
@@ -66,20 +75,26 @@ public class DefaultPartitioner implements Partitioner {
      * @param cluster The current cluster metadata
      */
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
+        //从Cluster中获取对应的topic的分区信息
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
+        //分区的个数
         int numPartitions = partitions.size();
+        //如果消息的key为null
         if (keyBytes == null) {
+            //递增counter
             int nextValue = counter.getAndIncrement();
+            //选择availablePartitions
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.size() > 0) {
+                //nextValue取绝对值，并对可用的分区数取余
                 int part = DefaultPartitioner.toPositive(nextValue) % availablePartitions.size();
                 return availablePartitions.get(part).partition();
             } else {
-                // no partitions are available, give a non-available partition
+                // 没有可用的分区，就提供一个不可用的分区，随机提供一个partitionId
                 return DefaultPartitioner.toPositive(nextValue) % numPartitions;
             }
         } else {
-            // hash the keyBytes to choose a partition
+            // 对key用murumur2算法进行hash，选择分区
             return DefaultPartitioner.toPositive(Utils.murmur2(keyBytes)) % numPartitions;
         }
     }

@@ -14,6 +14,7 @@ package org.apache.kafka.clients;
 
 /**
  * The states of a node connection
+ * node连接的状态
  */
 public enum ConnectionState {
     DISCONNECTED, CONNECTING, CONNECTED

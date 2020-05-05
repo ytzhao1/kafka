@@ -17,10 +17,11 @@ import java.util.Map;
 
 /**
  * The state of our connection to each node in the cluster.
- * 
+ * 管理所有连接中的状态
  */
 final class ClusterConnectionStates {
     private final long reconnectBackoffMs;
+    //底层实现，key是NodeId，value是NodeConnectionState对象
     private final Map<String, NodeConnectionState> nodeState;
 
     public ClusterConnectionStates(long reconnectBackoffMs) {
@@ -31,6 +32,8 @@ final class ClusterConnectionStates {
     /**
      * Return true iff we can currently initiate a new connection. This will be the case if we are not
      * connected and haven't been connected for at least the minimum reconnection backoff period.
+     *
+     * 如果我们当前可以启动新连接，则返回true。 如果我们不是这样的话已连接且至少在最小重新连接退避时间段内未连接。
      * @param id The connection id to check
      * @param now The current time in MS
      * @return true if we can initiate a new connection
@@ -40,6 +43,8 @@ final class ClusterConnectionStates {
         if (state == null)
             return true;
         else
+            //连接不能是CONNECTING状态，必须是DISCONNECTED，
+            // 为了避免网络拥塞，重连不能太频繁，两次重试之间的时间差必须大于重试的退避时间，由reconnectBackoffMs字段指定
             return state.state == ConnectionState.DISCONNECTED && now - state.lastConnectAttemptMs >= this.reconnectBackoffMs;
     }
 
@@ -147,10 +152,12 @@ final class ClusterConnectionStates {
     
     /**
      * The state of our connection to a node
+     * 我们与节点的连接状态
      */
     private static class NodeConnectionState {
-
+        //连接状态
         ConnectionState state;
+        //最近一次尝试连接的时间戳
         long lastConnectAttemptMs;
 
         public NodeConnectionState(ConnectionState state, long lastConnectAttempt) {

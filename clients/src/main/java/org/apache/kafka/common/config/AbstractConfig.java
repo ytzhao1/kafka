@@ -190,6 +190,7 @@ public class AbstractConfig {
      * Get a configured instance of the give class specified by the given configuration key. If the object implements
      * Configurable configure it using the configuration.
      *
+     * 获取由给定配置键指定的给定类的已配置实例。 如果对象实现可配置使用配置进行配置。
      * @param key The configuration key for the class
      * @param t The interface the class should implement
      * @return A configured instance of the class
